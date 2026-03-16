@@ -1,188 +1,107 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+// tasks/tasks.service.ts - Update methods to include user
 import {
-  BadRequestException,
   Injectable,
-  Logger,
   NotFoundException,
+  ForbiddenException,
 } from '@nestjs/common';
-import { Repository, DataSource, Brackets } from 'typeorm';
-import { Task } from './entities/task.entity';
 import { InjectRepository } from '@nestjs/typeorm';
-import { GetTasksFilterDto } from './dto/get-tasks-filter.dto';
-import { CreateTaskDto } from './dto/create-task.dto';
+import { Repository } from 'typeorm';
+import { Task } from './entities/task.entity';
 import { TaskStatus } from './enums/task.enum';
+import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
+import { GetTasksFilterDto } from './dto/get-tasks-filter.dto';
+import { User } from 'src/users/entities/user.entity';
 
 @Injectable()
 export class TasksService {
-  private logger = new Logger(TasksService.name);
-
   constructor(
     @InjectRepository(Task)
     private taskRepository: Repository<Task>,
-    private dataSource: DataSource, // For transactions
   ) {}
 
-  async getAllTasks(filterDto: GetTasksFilterDto): Promise<{
-    data: Task[];
-    total: number;
-    page: number;
-    limit: number;
-  }> {
-    const {
-      status,
-      search,
-      page = 1,
-      limit = 10,
-      sortBy = 'createdAt',
-      sortOrder = 'DESC',
-    } = filterDto;
+  async getTasks(filterDto: GetTasksFilterDto, user: User): Promise<Task[]> {
+    const { status, search } = filterDto;
 
-    // Create query builder for more complex queries
-    const queryBuilder = this.taskRepository.createQueryBuilder('task');
+    const query = this.taskRepository
+      .createQueryBuilder('task')
+      .leftJoinAndSelect('task.user', 'user')
+      .where('user.id = :userId', { userId: user.id });
 
-    // Apply filters
     if (status) {
-      queryBuilder.andWhere('task.status = :status', { status });
+      query.andWhere('task.status = :status', { status });
     }
 
-    // Apply search
     if (search) {
-      // MySQL full-text search (if searchVector is populated)
-      // queryBuilder.andWhere('MATCH(task.searchVector) AGAINST (:search IN NATURAL LANGUAGE MODE)', { search });
-      // Or use LIKE for simpler searches
-      queryBuilder.andWhere(
-        new Brackets((qb) => {
-          qb.where('task.title LIKE :search', {
-            search: `%${search}%`,
-          }).orWhere('task.description LIKE :search', {
-            search: `%${search}%`,
-          });
-        }),
+      query.andWhere(
+        '(LOWER(task.title) LIKE LOWER(:search) OR LOWER(task.description) LIKE LOWER(:search))',
+        { search: `%${search}%` },
       );
     }
 
-    // Get total count for pagination
-    const total = await queryBuilder.getCount();
-
-    // Apply pagination
-    const data = await queryBuilder
-      .orderBy(`task.${sortBy}`, sortOrder)
-      .skip((page - 1) * limit)
-      .take(limit)
-      .getMany();
-
-    return { data, total, page, limit };
+    return query.getMany();
   }
 
-  async getTaskById(id: string): Promise<Task> {
-    const task = await this.taskRepository.findOne({ where: { id } });
+  async getTaskById(id: string, user: User): Promise<Task> {
+    const task = await this.taskRepository.findOne({
+      where: { id },
+      relations: ['user'],
+    });
+
     if (!task) {
-      throw new NotFoundException(`Task with ID ${id} not found`);
+      throw new NotFoundException(`Task with ID "${id}" not found`);
     }
+
+    if (task.user?.id !== user.id && !user.roles?.includes('admin')) {
+      throw new ForbiddenException(
+        'You do not have permission to access this task',
+      );
+    }
+
     return task;
   }
 
-  async createTask(createTaskDto: CreateTaskDto): Promise<Task> {
+  async createTask(createTaskDto: CreateTaskDto, user: User): Promise<Task> {
     const { title, description } = createTaskDto;
 
-    // Create task instance
     const task = this.taskRepository.create({
       title,
       description,
       status: TaskStatus.OPEN,
+      user, // set relation only
     });
 
-    try {
-      // Save to database
-      const savedTask = await this.taskRepository.save(task);
-      this.logger.log(`Created task with ID ${savedTask.id}`);
-      return savedTask;
-    } catch (error) {
-      this.logger.error(
-        `Failed to create task. Data: ${JSON.stringify(createTaskDto)}`,
-        error.stack,
-      );
-
-      // Handle MySQL specific errors
-      if (error.code === 'ER_DUP_ENTRY') {
-        throw new BadRequestException('Task with this title already exists');
-      }
-
-      throw error;
-    }
+    await this.taskRepository.save(task);
+    return task;
   }
 
-  async updateTask(id: string, updateTaskDto: UpdateTaskDto): Promise<Task> {
-    const task = await this.getTaskById(id);
+  async updateTask(
+    id: string,
+    updateTaskDto: UpdateTaskDto,
+    user: User,
+  ): Promise<Task> {
+    const task = await this.getTaskById(id, user);
 
-    // Update only provided fields
     Object.assign(task, updateTaskDto);
+    await this.taskRepository.save(task);
 
-    try {
-      const updatedTask = await this.taskRepository.save(task);
-      return updatedTask;
-    } catch (error) {
-      this.logger.error(
-        `Failed to update task ${id}. Data: ${JSON.stringify(updateTaskDto)}`,
-        error.stack,
-      );
-      throw error;
-    }
+    return task;
   }
 
-  async deleteTask(id: string): Promise<void> {
-    const result = await this.taskRepository.delete(id);
-
-    if (result.affected === 0) {
-      throw new NotFoundException(`Task with ID "${id}" not found`);
-    }
+  async deleteTask(id: string, user: User): Promise<void> {
+    const task = await this.getTaskById(id, user);
+    await this.taskRepository.remove(task);
   }
 
-  async updateTaskStatus(id: string, status: TaskStatus): Promise<Task> {
-    return this.updateTask(id, { status });
+  async updateTaskStatus(
+    id: string,
+    status: TaskStatus,
+    user: User,
+  ): Promise<Task> {
+    return this.updateTask(id, { status }, user);
   }
 
-  // MySQL specific: Bulk insert with transaction
-  async createBulkTasks(createTaskDtos: CreateTaskDto[]): Promise<Task[]> {
-    const queryRunner = this.dataSource.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
-
-    try {
-      const tasks: Task[] = [];
-
-      for (const dto of createTaskDtos) {
-        const task = this.taskRepository.create(dto);
-        const saved = await queryRunner.manager.save(task);
-        tasks.push(saved);
-      }
-
-      await queryRunner.commitTransaction();
-      return tasks;
-    } catch (err) {
-      await queryRunner.rollbackTransaction();
-      this.logger.error('Bulk insert failed', err.stack);
-      throw new BadRequestException('Failed to create bulk tasks');
-    } finally {
-      await queryRunner.release();
-    }
-  }
-
-  // MySQL specific: Using raw query for complex operations
-  async getTaskStats(): Promise<any> {
-    const result = await this.dataSource.query(`
-      SELECT 
-        status,
-        COUNT(*) as count,
-        DATE(created_at) as date
-      FROM tasks
-      GROUP BY status, DATE(created_at)
-      ORDER BY date DESC
-      LIMIT 30
-    `);
-
-    return result;
+  async getAllTasksAdmin(): Promise<Task[]> {
+    return this.taskRepository.find({ relations: ['user'] });
   }
 }
