@@ -25,6 +25,12 @@ export class TasksController {
     return this.tasksService.getAllTasks(filterDto);
   }
 
+  // Task statistics
+  @Get('stats')
+  async getStats(): Promise<any> {
+    return this.tasksService.getTaskStats();
+  }
+
   @Post()
   create(@Body() createTaskDto: CreateTaskDto): Promise<Task> {
     return this.tasksService.createTask(createTaskDto);
@@ -52,11 +58,5 @@ export class TasksController {
   @Post('bulk')
   async createBulk(@Body() createTaskDtos: CreateTaskDto[]): Promise<Task[]> {
     return this.tasksService.createBulkTasks(createTaskDtos);
-  }
-
-  // Task statistics
-  @Get('stats')
-  async getStats(): Promise<any> {
-    return this.tasksService.getTaskStats();
   }
 }
