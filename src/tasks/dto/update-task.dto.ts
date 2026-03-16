@@ -1,10 +1,5 @@
 import { IsEnum, IsOptional } from 'class-validator';
-
-export enum TaskStatus {
-  OPEN = 'OPEN',
-  IN_PROGRESS = 'IN_PROGRESS',
-  DONE = 'DONE',
-}
+import { TaskStatus } from '../enums/task.enum';
 
 export class UpdateTaskDto {
   @IsOptional()

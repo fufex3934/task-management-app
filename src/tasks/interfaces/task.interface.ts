@@ -1,4 +1,4 @@
-import { TaskStatus } from '../dto/update-task.dto';
+import { TaskStatus } from '../enums/task.enum';
 
 export interface Task {
   id: string;
