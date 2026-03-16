@@ -3,9 +3,11 @@ import { Task } from './interfaces/task.interface';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { v4 as uuidv4 } from 'uuid';
 import { TaskStatus, UpdateTaskDto } from './dto/update-task.dto';
+import { ConfigService } from 'config/config.service';
 
 @Injectable()
 export class TasksService {
+  constructor(private configService: ConfigService) {}
   private tasks: Task[] = [];
 
   getAllTasks(status?: TaskStatus): Task[] {
