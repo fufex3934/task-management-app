@@ -1,39 +1,62 @@
-import { Body, Controller, Delete, Get, Patch, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { TasksService } from './tasks.service';
 import type { Task } from './interfaces/task.interface';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
-import { TaskQueryDto } from './dto/task-query.dto';
+import { GetTasksFilterDto } from './dto/get-tasks-filter.dto';
 
 @Controller('tasks')
 export class TasksController {
   constructor(private readonly tasksService: TasksService) {}
 
   @Get()
-  getAllTasks(status?: TaskQueryDto): Task[] {
-    return this.tasksService.getAllTasks(status?.status);
+  getAllTasks(
+    @Query() filterDto: GetTasksFilterDto,
+  ): Promise<{ data: Task[]; total: number; page: number; limit: number }> {
+    return this.tasksService.getAllTasks(filterDto);
   }
 
   @Post()
-  create(@Body() createTaskDto: CreateTaskDto): Task {
+  create(@Body() createTaskDto: CreateTaskDto): Promise<Task> {
     return this.tasksService.createTask(createTaskDto);
   }
 
   @Get(':id')
-  getTaskById(id: string): Task | undefined {
+  getTaskById(@Param('id') id: string): Promise<Task> {
     return this.tasksService.getTaskById(id);
   }
 
   @Patch(':id')
   updateTask(
-    id: string,
+    @Param('id') id: string,
     @Body() updateTaskDto: UpdateTaskDto,
-  ): Task | undefined {
+  ): Promise<Task> {
     return this.tasksService.updateTask(id, updateTaskDto);
   }
 
   @Delete(':id')
-  deleteTask(id: string): void {
+  deleteTask(@Param('id') id: string): Promise<void> {
     return this.tasksService.deleteTask(id);
+  }
+
+  // Bulk create tasks
+  @Post('bulk')
+  async createBulk(@Body() createTaskDtos: CreateTaskDto[]): Promise<Task[]> {
+    return this.tasksService.createBulkTasks(createTaskDtos);
+  }
+
+  // Task statistics
+  @Get('stats')
+  async getStats(): Promise<any> {
+    return this.tasksService.getTaskStats();
   }
 }
